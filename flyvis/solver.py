@@ -7,7 +7,7 @@ from typing import Dict, Optional, Protocol, Union
 
 import numpy as np
 import torch
-from datamate import Directory, Namespace
+from datamate import Directory, Namespace, namespacify
 from toolz import valfilter, valmap
 from torch import nn
 
@@ -32,6 +32,25 @@ except ImportError:  # datamate < 1.0
 logging = logging.getLogger(__name__)
 
 __all__ = ["MultiTaskSolver", "Penalty", "HyperParamScheduler"]
+
+
+def open_legacy_network_dir(name: str, config: dict) -> Optional[NetworkDir]:
+    """Open a network directory that stores delete_if_exists in its config.
+
+    Earlier versions passed delete_if_exists in the config, so directories created
+    by them store it and no longer match the config. Returns the directory if the
+    flag is the only difference, else None.
+    """
+    existing = NetworkDir(name)
+    stored = existing.config
+    if (
+        stored is not None
+        and "delete_if_exists" in stored
+        and stored.without("delete_if_exists")
+        == Namespace({"type": stored.type, **namespacify(config)})
+    ):
+        return existing
+    return None
 
 
 class SolverProtocol(Protocol):
@@ -121,7 +140,12 @@ class MultiTaskSolver:
             with delete_existing_directory():
                 self.dir = NetworkDir(name, config)
         else:
-            self.dir = NetworkDir(name, config)
+            try:
+                self.dir = NetworkDir(name, config)
+            except FileExistsError:
+                self.dir = open_legacy_network_dir(name, config)
+                if self.dir is None:
+                    raise
 
         self.path = self.dir.path
 
@@ -441,7 +465,7 @@ class MultiTaskSolver:
             ```
         """
         self._last_chkpt_ind += 1
-        self._curr_chkpt_ind += 1
+        self._curr_chkpt_ind = self._last_chkpt_ind
 
         # Tracking of validation loss and training batch loss.
         logging.info("Test on validation data.")

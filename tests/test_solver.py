@@ -3,6 +3,7 @@ import pytest
 import torch
 from datamate import set_root_context
 
+from flyvis.network.directories import NetworkDir
 from flyvis.solver import MultiTaskSolver
 from flyvis.utils.config_utils import get_default_config
 
@@ -118,3 +119,27 @@ def test_solver_recover(mock_sintel_data, tmp_path):
         fresh = MultiTaskSolver("test", config, delete_if_exists=True)
         assert fresh.checkpoints == []
         assert "loss" not in fresh.dir
+
+
+def test_solver_recover_older_checkpoint_then_checkpoint(mock_sintel_data, tmp_path):
+    with set_root_context(str(tmp_path)):
+        solver = MultiTaskSolver("test", small_config(mock_sintel_data, n_iters=2))
+        solver.train()
+        assert solver.checkpoints == [0, 1]
+
+        solver.recover(checkpoint=0)
+        solver.checkpoint()
+        assert solver._last_chkpt_ind == solver._curr_chkpt_ind == 2
+
+
+def test_solver_opens_directory_with_stored_delete_flag(mock_sintel_data, tmp_path):
+    # directories created before the fix store delete_if_exists in their config
+    config = {**small_config(mock_sintel_data, n_iters=2), "delete_if_exists": False}
+    with set_root_context(str(tmp_path)):
+        legacy = NetworkDir("test", config)
+
+        solver = MultiTaskSolver("test", config)
+        assert solver.dir.path == legacy.path
+
+        with pytest.raises(FileExistsError):
+            MultiTaskSolver("test", small_config(mock_sintel_data, n_iters=3))
